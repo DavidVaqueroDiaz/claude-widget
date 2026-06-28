@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Net.Http;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -41,6 +42,48 @@ public static class ApproverService
     {
         const string std = @"C:\Program Files\nodejs\node.exe";
         return File.Exists(std) ? std : "node";
+    }
+
+    private static string? _resolvedCli;
+    private static bool _resolvedCliDone;
+
+    /// <summary>
+    /// Localiza el cli.mjs del approver: 1) ruta puesta en Ajustes; 2) deducida
+    /// del hook PermissionRequest de ~/.claude/settings.json (donde el propio
+    /// approver se registró). Si no se encuentra, null = usar comando global.
+    /// </summary>
+    private static string? ResolveCli()
+    {
+        if (!string.IsNullOrEmpty(CliPath) && File.Exists(CliPath)) return CliPath;
+        if (_resolvedCliDone) return _resolvedCli;
+        _resolvedCliDone = true;
+
+        try
+        {
+            var sp = Path.Combine(Home, ".claude", "settings.json");
+            if (File.Exists(sp))
+            {
+                using var doc = JsonDocument.Parse(File.ReadAllText(sp));
+                if (doc.RootElement.TryGetProperty("hooks", out var hooks) &&
+                    hooks.TryGetProperty("PermissionRequest", out var pr) && pr.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var entry in pr.EnumerateArray())
+                    {
+                        if (!entry.TryGetProperty("hooks", out var hs) || hs.ValueKind != JsonValueKind.Array) continue;
+                        foreach (var h in hs.EnumerateArray())
+                        {
+                            if (!h.TryGetProperty("command", out var c) || c.ValueKind != JsonValueKind.String) continue;
+                            var cmd = c.GetString() ?? "";
+                            var m = Regex.Match(cmd, "\"([^\"]+\\.mjs)\"");
+                            string? path = m.Success ? m.Groups[1].Value : Regex.Match(cmd, "(\\S+\\.mjs)").Groups[1].Value;
+                            if (!string.IsNullOrEmpty(path) && File.Exists(path)) { _resolvedCli = path; return path; }
+                        }
+                    }
+                }
+            }
+        }
+        catch { }
+        return _resolvedCli;
     }
 
     /// <summary>Lee la petición pendiente, o null si no hay.</summary>
@@ -167,11 +210,12 @@ public static class ApproverService
                 UseShellExecute = false,
                 CreateNoWindow = true,
             };
-            if (!string.IsNullOrEmpty(CliPath) && File.Exists(CliPath))
+            var cli = ResolveCli();
+            if (!string.IsNullOrEmpty(cli))
             {
-                // Approver clonado en local: node cli.mjs <comando>
+                // Approver local (ruta de Ajustes o deducida del hook): node cli.mjs <comando>
                 psi.FileName = ResolveNode();
-                psi.ArgumentList.Add(CliPath);
+                psi.ArgumentList.Add(cli);
                 psi.ArgumentList.Add(command);
             }
             else
