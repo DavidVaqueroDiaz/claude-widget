@@ -24,6 +24,7 @@ public partial class MainWindow : Window
     // --- Estado para los gestos del bicho ---
     private bool _pendingActive;                 // hay permiso esperando
     private long _lastActivityTick = Environment.TickCount64;
+    private long _lastActivityUnixMs;            // última actividad real de Claude (ms Unix)
     private long _prevBlockTokens = -1;
     private double _prevSessionPct = -1;
     private long _celebrateUntil;                // bailar tras reinicio de límite
@@ -172,6 +173,12 @@ public partial class MainWindow : Window
 
             // Descartar peticiones obsoletas (hook caído): Since está en milisegundos.
             if (pending != null && IsStale(pending)) pending = null;
+
+            // Ya resuelta: si Claude siguió trabajando (creció el uso) DESPUÉS de
+            // crearse esta petición, es que ya se contestó (aunque el approver no
+            // borrara el archivo, p.ej. preguntas respondidas dentro del chat).
+            if (pending != null && pending.Since > 0 && _lastActivityUnixMs > pending.Since + 3000)
+                pending = null;
 
             // Tras pulsar Aprobar/Denegar ignoramos el archivo unos segundos.
             if (Environment.TickCount64 < _suppressPendingUntil) pending = null;
@@ -348,7 +355,10 @@ public partial class MainWindow : Window
             if (snap.Ok)
             {
                 if (_prevBlockTokens >= 0 && snap.BlockTokens > _prevBlockTokens)
+                {
                     _lastActivityTick = Environment.TickCount64;
+                    _lastActivityUnixMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+                }
                 _prevBlockTokens = snap.BlockTokens;
             }
             // Celebración: ¿se ha reiniciado la sesión? (% cae de alto a casi 0)
