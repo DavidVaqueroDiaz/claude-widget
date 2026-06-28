@@ -1,0 +1,11 @@
+# Compilación .NET
+bin/
+obj/
+app/
+*.user
+*.suo
+.vs/
+
+# Configuración local del usuario (NO se publica)
+settings.json
+*.credentials.json
