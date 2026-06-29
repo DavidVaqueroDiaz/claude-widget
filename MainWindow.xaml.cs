@@ -19,6 +19,8 @@ public partial class MainWindow : Window
     private bool _loadingUsage;
     private UsageSnapshot? _lastSnap;
     private PlanUsage? _plan;
+    private long _lastPlanPollTick;
+    private bool _planPolledOnce;
     private int _page = 1;
 
     // --- Estado para los gestos del bicho ---
@@ -363,7 +365,21 @@ public partial class MainWindow : Window
         try
         {
             var snap = await UsageService.GetAsync();
-            _plan = _settings.UsePlanApi ? await UsageApiService.GetAsync() : null;
+
+            // El % del plan se consulta poco (cada ~3 min) para no chocar con el
+            // rate limit de Anthropic. Si falla, conservamos las últimas barras buenas.
+            if (_settings.UsePlanApi)
+            {
+                long t = Environment.TickCount64;
+                if (!_planPolledOnce || t - _lastPlanPollTick > 180_000)
+                {
+                    _planPolledOnce = true;
+                    _lastPlanPollTick = t;
+                    var pu = await UsageApiService.GetAsync();
+                    if (pu.Ok || _plan is not { Ok: true }) _plan = pu;
+                }
+            }
+            else _plan = null;
 
             // Actividad: ¿han crecido los tokens de la ventana de 5h?
             if (snap.Ok)
@@ -540,6 +556,7 @@ public partial class MainWindow : Window
         {
             "no-token" => "% del plan: ejecuta «claude login»",
             "auth" => "% del plan: token caducado → «claude login»",
+            "rate" => "% del plan: límite temporal de Anthropic, se reintenta solo",
             _ => "% del plan no disponible (ccusage exacto)"
         };
     }
