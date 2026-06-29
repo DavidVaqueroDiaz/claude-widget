@@ -167,6 +167,20 @@ public partial class MainWindow : Window
         try
         {
             bool free = ApproverService.IsFreeMode();
+
+            // Sincronización con el móvil: si pediste desactivar la barra libre
+            // desde el móvil, aplícalo aquí también (el approver no lo borra hasta
+            // la siguiente petición).
+            if (free)
+            {
+                var fm = ApproverService.ReadFreeMode();
+                if (fm.HasValue && fm.Value.active && await ApproverService.DisableSignalFromPhoneAsync(fm.Value.sinceSec))
+                {
+                    await ApproverService.FreeModeOffAsync();
+                    free = false;
+                }
+            }
+
             SetFreeModeButton(free);
 
             PendingInfo? pending = free ? null : ApproverService.ReadPending();

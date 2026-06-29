@@ -101,16 +101,57 @@ public static class ApproverService
     }
 
     /// <summary>¿Está activada la "barra libre" (aceptación automática)?</summary>
-    public static bool IsFreeMode()
+    public static bool IsFreeMode() => ReadFreeMode() is { active: true };
+
+    /// <summary>Estado de la barra libre: activa y desde cuándo (unix segundos).</summary>
+    public static (bool active, long sinceSec)? ReadFreeMode()
     {
         try
         {
-            if (!File.Exists(FreeModePath)) return false;
-            var json = File.ReadAllText(FreeModePath);
-            using var doc = JsonDocument.Parse(json);
-            return doc.RootElement.TryGetProperty("active", out var a) && a.ValueKind == JsonValueKind.True;
+            if (!File.Exists(FreeModePath)) return null;
+            using var doc = JsonDocument.Parse(File.ReadAllText(FreeModePath));
+            var r = doc.RootElement;
+            bool active = r.TryGetProperty("active", out var a) && a.ValueKind == JsonValueKind.True;
+            long since = r.TryGetProperty("since", out var s) && s.ValueKind == JsonValueKind.Number ? s.GetInt64() : 0;
+            return (active, since);
         }
-        catch { return false; }
+        catch { return null; }
+    }
+
+    /// <summary>
+    /// ¿Pediste DESACTIVAR la barra libre desde el móvil? (botón "Desactivar" del
+    /// approver, que publica en el topic de control). Así el widget lo aplica al
+    /// momento en vez de esperar a la siguiente petición.
+    /// </summary>
+    public static async Task<bool> DisableSignalFromPhoneAsync(long sinceSec)
+    {
+        if (sinceSec <= 0) return false;
+        var cfg = LoadNtfyConfig();
+        if (cfg == null) return false;
+        string url = $"{cfg.Value.server}/{cfg.Value.topic}-control/json?poll=1&since={sinceSec}";
+        try
+        {
+            using var req = new HttpRequestMessage(HttpMethod.Get, url);
+            if (cfg.Value.auth != null) req.Headers.TryAddWithoutValidation("Authorization", "Basic " + cfg.Value.auth);
+            using var resp = await Http.SendAsync(req);
+            if (!resp.IsSuccessStatusCode) return false;
+            foreach (var line in (await resp.Content.ReadAsStringAsync()).Split('\n'))
+            {
+                if (string.IsNullOrWhiteSpace(line)) continue;
+                try
+                {
+                    using var ev = JsonDocument.Parse(line);
+                    if (!ev.RootElement.TryGetProperty("message", out var msgEl)) continue;
+                    var msg = msgEl.GetString();
+                    if (string.IsNullOrEmpty(msg)) continue;
+                    using var m = JsonDocument.Parse(msg);
+                    if (m.RootElement.TryGetProperty("disableFreeMode", out var d) && d.ValueKind == JsonValueKind.True) return true;
+                }
+                catch { }
+            }
+        }
+        catch { }
+        return false;
     }
 
     // -------- ¿Ya se respondió la petición (en el móvil, widget, etc.)? --------
