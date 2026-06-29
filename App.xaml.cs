@@ -15,6 +15,8 @@ public partial class App : Application
     {
         // Red de seguridad: un fallo inesperado NO debe cerrar el widget.
         DispatcherUnhandledException += OnDispatcherUnhandledException;
+        AppDomain.CurrentDomain.UnhandledException += (_, _) => { };
+        System.Threading.Tasks.TaskScheduler.UnobservedTaskException += (_, e) => e.SetObserved();
     }
 
     protected override void OnStartup(StartupEventArgs e)
