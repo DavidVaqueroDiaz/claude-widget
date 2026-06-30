@@ -79,6 +79,14 @@ Si `claude` no está en el PATH, usa la ruta completa (cambia la versión por la
 ```
 Esto crea `~/.claude/.credentials.json`, que el widget lee (no descifra nada).
 
+**Auto-refresco (recomendado):** el token caduca cada pocas horas. Para que se
+renueve solo —con el **CLI oficial**, sin navegador ni rate limit— crea una tarea
+programada que ejecute `refrescar-token.ps1` cada 4 h (cambia la ruta por la tuya):
+```powershell
+schtasks /create /tn "ClaudeWidget-RefrescarToken" /tr "powershell -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File \"C:\ruta\a\claude-widget\refrescar-token.ps1\"" /sc hourly /mo 4 /f
+```
+Así no tendrás que volver a hacer `claude login` y las barras de % se mantienen.
+
 ### 🙋 Paso manual 2 — Aprobar/denegar permisos (opcional pero recomendado)
 Las funciones de permiso usan [claude-remote-approver](https://www.npmjs.com/package/claude-remote-approver):
 
