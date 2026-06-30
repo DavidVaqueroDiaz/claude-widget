@@ -372,8 +372,8 @@ public partial class MainWindow : Window
             if (_settings.UsePlanApi)
             {
                 long t = Environment.TickCount64;
-                // Si nos limitaron (429), esperar 20 min para no empeorarlo; si no, 3 min.
-                long interval = _planRateLimited ? 1_200_000 : 180_000;
+                // Si nos limitaron (429), esperar 20 min para no empeorarlo; si no, 5 min.
+                long interval = _planRateLimited ? 1_200_000 : 300_000;
                 if (!_planPolledOnce || t - _lastPlanPollTick > interval)
                 {
                     _planPolledOnce = true;
