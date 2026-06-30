@@ -21,6 +21,7 @@ public partial class MainWindow : Window
     private PlanUsage? _plan;
     private long _lastPlanPollTick;
     private bool _planPolledOnce;
+    private bool _planRateLimited;
     private int _page = 1;
 
     // --- Estado para los gestos del bicho ---
@@ -371,11 +372,14 @@ public partial class MainWindow : Window
             if (_settings.UsePlanApi)
             {
                 long t = Environment.TickCount64;
-                if (!_planPolledOnce || t - _lastPlanPollTick > 180_000)
+                // Si nos limitaron (429), esperar 20 min para no empeorarlo; si no, 3 min.
+                long interval = _planRateLimited ? 1_200_000 : 180_000;
+                if (!_planPolledOnce || t - _lastPlanPollTick > interval)
                 {
                     _planPolledOnce = true;
                     _lastPlanPollTick = t;
                     var pu = await UsageApiService.GetAsync();
+                    _planRateLimited = pu.Error == "rate";
                     if (pu.Ok || _plan is not { Ok: true }) _plan = pu;
                 }
             }
