@@ -29,11 +29,7 @@ public static class UsageApiService
 {
     private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(10) };
     private const string UsageUrl = "https://api.anthropic.com/api/oauth/usage";
-    private const string TokenUrl = "https://platform.claude.com/v1/oauth/token";
-    private const string ClientId = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";   // client OAuth de Claude Code
     private const string UserAgent = "claude-code/2.1.187";
-
-    private static long _lastRefreshTick;   // freno anti-machaque del refresco
 
     public static string? FindCredentialsFile()
     {
@@ -88,25 +84,11 @@ public static class UsageApiService
         if (oauth == null) { pu.Error = "no-token"; return pu; }
 
         string? token = oauth["accessToken"]?.GetValue<string>();
-        long expMs = 0;
-        try { expMs = oauth["expiresAt"]?.GetValue<long>() ?? 0; } catch { }
         if (string.IsNullOrEmpty(token)) { pu.Error = "no-token"; return pu; }
 
-        // Refresco proactivo si está caducado (o a punto).
-        long nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-        if (expMs > 0 && expMs < nowMs + 120_000)
-        {
-            if (await TryRefreshAsync(node!, oauth, path)) token = oauth["accessToken"]?.GetValue<string>();
-        }
-
+        // El token lo mantiene fresco la tarea programada (CLI oficial), NO el widget,
+        // para no chocar con el rate limit (429). Aquí solo lo usamos.
         var (status, body) = await CallUsageAsync(token!);
-
-        // Si el token no vale, intenta refrescar una vez y reintenta.
-        if (status == 401 && await TryRefreshAsync(node!, oauth, path))
-        {
-            token = oauth["accessToken"]?.GetValue<string>();
-            (status, body) = await CallUsageAsync(token!);
-        }
 
         if (status == 429) { pu.Error = "rate"; return pu; }
         if (status == 401) { pu.Error = "auth"; return pu; }
@@ -141,43 +123,6 @@ public static class UsageApiService
             return ((int)resp.StatusCode, b);
         }
         catch { return (0, null); }
-    }
-
-    /// <summary>Refresca el token con el flujo OAuth estándar y lo guarda en el fichero.</summary>
-    private static async Task<bool> TryRefreshAsync(JsonNode node, JsonObject oauth, string path)
-    {
-        if (Environment.TickCount64 - _lastRefreshTick < 30_000) return false;   // no machacar
-        _lastRefreshTick = Environment.TickCount64;
-
-        string? rt = oauth["refreshToken"]?.GetValue<string>();
-        if (string.IsNullOrEmpty(rt)) return false;
-
-        try
-        {
-            var payload = JsonSerializer.Serialize(new { grant_type = "refresh_token", refresh_token = rt, client_id = ClientId });
-            using var req = new HttpRequestMessage(HttpMethod.Post, TokenUrl)
-            { Content = new StringContent(payload, Encoding.UTF8, "application/json") };
-            req.Headers.TryAddWithoutValidation("User-Agent", UserAgent);
-
-            using var resp = await Http.SendAsync(req);
-            if (!resp.IsSuccessStatusCode) return false;
-
-            using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
-            var r = doc.RootElement;
-            string? at = r.TryGetProperty("access_token", out var a) ? a.GetString() : null;
-            if (string.IsNullOrEmpty(at)) return false;
-            string nrt = r.TryGetProperty("refresh_token", out var rr) ? rr.GetString() ?? rt : rt;
-            long expIn = r.TryGetProperty("expires_in", out var e) && e.ValueKind == JsonValueKind.Number ? e.GetInt64() : 0;
-
-            oauth["accessToken"] = at;
-            oauth["refreshToken"] = nrt;
-            if (expIn > 0) oauth["expiresAt"] = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() + expIn * 1000;
-
-            try { if (!File.Exists(path + ".bak")) File.Copy(path, path + ".bak"); } catch { }
-            File.WriteAllText(path, node.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
-            return true;
-        }
-        catch { return false; }
     }
 
     private static double GetUtil(JsonElement obj)

@@ -15,7 +15,7 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _usageTimer;
     private readonly DispatcherTimer _pendingTimer;
     private readonly DispatcherTimer _claudeTimer = new();
-    private bool _claudeWasRunning;
+    private bool _manualHidden;   // el usuario lo ocultó con la ✕
     private bool _loadingUsage;
     private UsageSnapshot? _lastSnap;
     private PlanUsage? _plan;
@@ -72,8 +72,7 @@ public partial class MainWindow : Window
 
             // Parte 4: arranque automático + visibilidad ligada a Claude.
             Autostart.Apply(_settings.StartWithWindows);
-            _claudeWasRunning = IsClaudeDesktopRunning();
-            if (_settings.LinkToClaude && !_claudeWasRunning) Hide();
+            if (_settings.LinkToClaude && !IsClaudeDesktopRunning()) Hide();
             _claudeTimer.Start();
 
             await PollApproverAsync();
@@ -87,10 +86,17 @@ public partial class MainWindow : Window
     private void CheckClaude()
     {
         if (!_settings.LinkToClaude) return;
-        bool running = IsClaudeDesktopRunning();
-        if (running && !_claudeWasRunning) ShowWidget();        // Claude se abrió → aparecer
-        else if (!running && _claudeWasRunning) Hide();          // Claude se cerró → ocultar
-        _claudeWasRunning = running;
+        if (IsClaudeDesktopRunning())
+        {
+            // Claude abierto → asegurar que el widget está visible (salvo que TÚ lo ocultaras).
+            if (!IsVisible && !_manualHidden) ShowWidget();
+        }
+        else
+        {
+            // Claude cerrado → ocultar; al reabrir volverá a aparecer.
+            if (IsVisible) Hide();
+            _manualHidden = false;
+        }
     }
 
     private void ShowWidget()
@@ -149,7 +155,7 @@ public partial class MainWindow : Window
         if (_lastSnap != null) RenderUsage(_lastSnap);
     }
 
-    private void HideBtn_Click(object sender, RoutedEventArgs e) => Hide();
+    private void HideBtn_Click(object sender, RoutedEventArgs e) { _manualHidden = true; Hide(); }
 
     // ---------------- Navegación entre pantallas ----------------
     private void PrevPage_Click(object sender, RoutedEventArgs e) => SetPage(_page == 1 ? 2 : 1);
